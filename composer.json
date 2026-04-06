@@ -1,0 +1,28 @@
+{
+    "name": "aichouchm/magento-innovation-lab",
+    "description": "Magento 2 personal innovation lab – dev tooling",
+    "type": "project",
+    "license": "proprietary",
+    "require": {
+        "php": ">=8.2",
+        "consolidation/robo": "^4.0"
+    },
+    "require-dev": {
+        "friendsofphp/php-cs-fixer": "^3.0",
+        "phpstan/phpstan": "^1.2",
+        "squizlabs/php_codesniffer": "^3.6"
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "sort-packages": true,
+        "bin-dir": "bin"
+    },
+    "autoload": {
+        "psr-4": {}
+    },
+    "scripts": {
+        "lint":     "bin/phpcs --standard=phpcs.xml",
+        "lint:fix": "bin/phpcbf --standard=phpcs.xml",
+        "analyse":  "bin/phpstan analyse --configuration=phpstan.neon"
+    }
+}

@@ -1,0 +1,23 @@
+{
+    "aichouchm_product_relation": {
+        "column": {
+            "entity_id": true,
+            "product_id": true,
+            "related_product_id": true,
+            "relation_type": true,
+            "sort_order": true,
+            "is_active": true,
+            "created_at": true,
+            "updated_at": true
+        },
+        "constraint": {
+            "PRIMARY": true,
+            "AICHOUCHM_PRODUCT_RELATION_UNIQUE": true,
+            "AICHOUCHM_PRODUCT_RELATION_PRODUCT_ID": true,
+            "AICHOUCHM_PRODUCT_RELATION_RELATED_ID": true
+        },
+        "index": {
+            "AICHOUCHM_PRODUCT_RELATION_PRODUCT_TYPE_ACTIVE": true
+        }
+    }
+}

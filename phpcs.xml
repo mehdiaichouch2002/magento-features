@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<ruleset name="Magento2 Lab">
+    <description>PHPCS ruleset for the Magento 2 Innovation Lab</description>
+
+    <arg name="basepath" value="."/>
+    <arg name="colors"/>
+    <arg name="parallel" value="8"/>
+    <arg value="sp"/>
+
+    <!-- Target only custom modules -->
+    <file>modules/</file>
+
+    <exclude-pattern>*/Test/*</exclude-pattern>
+    <exclude-pattern>*/vendor/*</exclude-pattern>
+
+    <!-- PSR-12 base -->
+    <rule ref="PSR12"/>
+
+    <!-- Magento ECG rules (install: composer require magento/magento-coding-standard) -->
+    <!-- Uncomment when available in the container:
+    <rule ref="Magento2"/>
+    -->
+
+    <!-- Disallow direct ObjectManager usage -->
+    <rule ref="Magento2.PHP.FinalImplementation"/>
+    <rule ref="Generic.PHP.NoSilencedErrors"/>
+    <rule ref="Squiz.Functions.FunctionDeclarationArgumentSpacing">
+        <properties>
+            <property name="equalsSpacing" value="1"/>
+        </properties>
+    </rule>
+</ruleset>

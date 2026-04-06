@@ -1,0 +1,13 @@
+parameters:
+    level: 8
+    paths:
+        - modules/
+    excludePaths:
+        - modules/*/Test/*
+        - modules/*/vendor/*
+    checkMissingIterableValueType: false
+    # Magento stubs — install via: composer require --dev phpstan/extension-installer bitexpert/phpstan-magento
+    bootstrapFiles: []
+    ignoreErrors:
+        # Magento abstract model magic getters/setters
+        - '#Call to an undefined method Magento\\Framework\\Model\\AbstractModel::#'

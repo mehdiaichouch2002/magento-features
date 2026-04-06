@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<routes xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="urn:magento:module:Magento_Webapi:etc/webapi.xsd">
+
+    <!-- GET  /V1/products/:productId/relations -->
+    <route url="/V1/products/:productId/relations" method="GET">
+        <service class="Aichouchm\ProductRelations\Api\ProductRelationRepositoryInterface" method="getByProductId"/>
+        <resources>
+            <resource ref="Magento_Catalog::products"/>
+        </resources>
+    </route>
+
+    <!-- POST /V1/product-relations -->
+    <route url="/V1/product-relations" method="POST">
+        <service class="Aichouchm\ProductRelations\Api\ProductRelationRepositoryInterface" method="save"/>
+        <resources>
+            <resource ref="Aichouchm_ProductRelations::manage"/>
+        </resources>
+    </route>
+
+    <!-- DELETE /V1/product-relations/:entityId -->
+    <route url="/V1/product-relations/:entityId" method="DELETE">
+        <service class="Aichouchm\ProductRelations\Api\ProductRelationRepositoryInterface" method="deleteById"/>
+        <resources>
+            <resource ref="Aichouchm_ProductRelations::manage"/>
+        </resources>
+    </route>
+
+</routes>
