@@ -12,8 +12,8 @@ The stack is inspired by real-world production setups: a dedicated maintenance c
 |---|---|---|
 | `php` | PHP 8.3-FPM (custom) | Serves HTTP requests only |
 | `maintenance` | same image | CLI: `bin/magento`, `composer`, cron |
-| `nginx` | nginx:1.25-alpine | PHP-FPM proxy, port 8080 |
-| `varnish` | varnish:7.4-alpine | HTTP cache layer, port 80 |
+| `nginx` | nginx:1.25-alpine | PHP-FPM proxy |
+| `varnish` | varnish:7.4-alpine | HTTP cache layer |
 | `db` | mariadb:10.6 | Database |
 | `elasticsearch` | opensearch:2.12 | Search engine |
 | `redis` | redis:7.2-alpine | Cache / FPC / Sessions |
@@ -26,11 +26,13 @@ The stack is inspired by real-world production setups: a dedicated maintenance c
 |---|---|---|
 | `80` | Varnish | Full-page cache enabled |
 | `8080` | Nginx | Direct PHP access, bypass cache |
-| `8025` | Mailhog UI | Catches all outbound email |
-| `15672` | RabbitMQ UI | Management interface |
+| `8025` | Mailhog UI | |
+| `15672` | RabbitMQ UI | |
 | `3306` | MySQL | `127.0.0.1` only |
 | `9200` | OpenSearch | |
 | `6379` | Redis | |
+
+All ports can be overridden in `.env` (e.g. `MYSQL_PORT=3307`).
 
 > **Dev tip:** Use port `8080` during active development (no cache friction). Switch to port `80` when testing full-page cache behaviour.
 
@@ -58,7 +60,7 @@ make
 
 `make` does everything once: installs Robo (downloads Composer locally if needed), creates `volumes/`, copies `.env.example → .env`, and writes the `.made` version file.
 
-Then add the `robo` shell alias so you can type `robo` instead of `./robo`:
+Add the `robo` shell alias so you can type `robo` instead of `./robo`:
 
 ```bash
 # zsh
@@ -81,28 +83,27 @@ Get keys here (free): https://commercemarketplace.adobe.com/customer/accessKeys/
 
 Everything else in `.env` works out of the box for local development.
 
-### 3. Start
+### 3. Add the local domain
+
+```bash
+echo "127.0.0.1 magento.local" | sudo tee -a /etc/hosts
+```
+
+### 4. Start
 
 ```bash
 robo up
 ```
 
-That's it. On first run, `robo up` detects that Magento isn't installed yet and runs the full installer automatically — clears the web root, pulls Magento via Composer (~600 packages), runs `setup:install` wired to all services, sets developer mode, disables 2FA, fixes file ownership, and symlinks all modules. URLs are printed when done.
+On first run, `robo up` detects that Magento isn't installed and runs the full installer automatically — downloads Magento via Composer, runs `setup:install` wired to all services, enables developer mode, disables 2FA, and symlinks all modules. URLs are printed when done.
 
-Subsequent `robo up` calls start the stack in seconds and re-link modules.
+Subsequent `robo up` calls bring the stack up in seconds.
 
-To include sample data (products, categories, customers) on a fresh install, run the installer manually instead:
+To include sample data on a fresh install, run instead:
 
 ```bash
 robo install --sample-data
 ```
-
-> **Port conflicts:** If another project already uses one of the default ports, override in `.env` before starting:
-> ```dotenv
-> OPENSEARCH_PORT=9201
-> MYSQL_PORT=3307
-> REDIS_PORT=6380
-> ```
 
 ---
 
@@ -113,10 +114,10 @@ All commands go through `robo`. Run `robo list` for the full list.
 ### Stack
 
 ```bash
-robo up                  # Start (auto-installs + auto-links modules on first run)
+robo up                  # Start (auto-installs on first run)
 robo down                # Stop containers, keep volumes
 robo ps                  # Container status
-robo build               # Rebuild images (run this after changing the Dockerfile)
+robo build               # Rebuild images (after changing the Dockerfile)
 robo build --no-cache    # Rebuild without layer cache
 robo logs [service]      # Tail logs (omit service = all)
 ```
@@ -135,19 +136,17 @@ robo shell nginx         # bash in any container
 ### Module workflow
 
 ```bash
-# Link all modules/ into src/app/code/
-# (called automatically by robo up — only needed manually after adding a module
-#  without restarting the stack)
+# Symlink modules/ → src/app/code/ (called automatically by robo up)
 robo module:link
 
 # Enable a module
-robo module:enable Aichouchm_ProductRelations
+robo module:enable Vendor_Module
 
 # After editing code — re-compile DI and clean caches
-robo module:init Aichouchm_ProductRelations
+robo module:init Vendor_Module
 
 # Disable
-robo module:disable Aichouchm_ProductRelations
+robo module:disable Vendor_Module
 ```
 
 ### Cache
@@ -205,7 +204,7 @@ magento-features/
 │   │   └── php.ini           # OPcache, memory, error reporting
 │   ├── nginx/
 │   │   ├── nginx.conf
-│   │   └── default.conf      # Listens on 8080 (Varnish backend) + 80
+│   │   └── default.conf      # Listens on 8080 (Varnish backend)
 │   ├── mysql/
 │   │   └── my.cnf            # InnoDB tuning, slow-query log
 │   └── varnish/
@@ -234,8 +233,10 @@ magento-features/
 ## Adding a new module
 
 1. Create it in `modules/Vendor/ModuleName/`
-2. Run `robo module:enable Vendor_ModuleName` (symlinks are created automatically by `robo up`; if the stack is already running, run `robo module:link` first)
+2. Run `robo module:enable Vendor_ModuleName`
 3. Run `robo module:init Vendor_ModuleName`
+
+Symlinks into `src/app/code/` are created automatically by `robo up`. If the stack is already running, run `robo module:link` first.
 
 Each module is an independent, self-contained Git project. The `modules/` directory is the portfolio.
 
@@ -271,7 +272,7 @@ DELETE /V1/product-relations/:entityId     # Delete a relation
 ## Xdebug with PhpStorm
 
 1. In PhpStorm: **Preferences → PHP → Servers** — add a server with:
-   - Host: `magento.local` (or `localhost`)
+   - Host: `magento.local`
    - Path mappings: project `/src` → `/var/www/html`
 2. Run `robo xdebug:on`
 3. Start listening in PhpStorm (phone icon)
@@ -281,15 +282,15 @@ DELETE /V1/product-relations/:entityId     # Delete a relation
 
 ## Version integrity
 
-The project uses a `.version` / `.made` system (inspired by production workflow):
+The project uses a `.version` / `.made` system:
 
 - `.version` is committed and incremented when the setup changes
 - `.made` is written by `make` and must match `.version`
-- `robo up` and `robo install` will abort with a clear error if they don't match
+- `robo up` and `robo install` abort with a clear error if they differ
 
 After a `git pull`:
 ```bash
-make update   # Re-installs deps and bumps .made
+make update
 ```
 
 ---
