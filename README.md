@@ -58,6 +58,16 @@ make
 
 `make` does everything once: installs Robo (downloads Composer locally if needed), creates `volumes/`, copies `.env.example → .env`, and writes the `.made` version file.
 
+Then add the `robo` shell alias so you can type `robo` instead of `./robo`:
+
+```bash
+# zsh
+echo "alias robo='./robo'" >> ~/.zshrc && source ~/.zshrc
+
+# bash
+echo "alias robo='./robo'" >> ~/.bashrc && source ~/.bashrc
+```
+
 ### 2. Add your credentials to `.env`
 
 Open `.env` and fill in the two lines at the top:
@@ -74,11 +84,11 @@ Everything else in `.env` works out of the box for local development.
 ### 3. Start and install
 
 ```bash
-./robo up
-./robo install
+robo up
+robo install
 
 # With sample data (products, categories, customers):
-./robo install --sample-data
+robo install --sample-data
 ```
 
 That's it. The installer pulls Magento via Composer, runs `setup:install` wired to all services, sets developer mode, and disables 2FA.
@@ -87,58 +97,58 @@ That's it. The installer pulls Magento via Composer, runs `setup:install` wired 
 
 ## Robo — task runner
 
-All commands go through `./robo`. Run `./robo list` for the full list.
+All commands go through `robo`. Run `robo list` for the full list.
 
 ### Stack
 
 ```bash
-./robo up                  # Start (builds images on first run)
-./robo down                # Stop containers, keep volumes
-./robo ps                  # Container status
-./robo build               # Rebuild images
-./robo build --no-cache    # Rebuild without layer cache
-./robo logs [service]      # Tail logs (omit service = all)
+robo up                  # Start (builds images on first run)
+robo down                # Stop containers, keep volumes
+robo ps                  # Container status
+robo build               # Rebuild images
+robo build --no-cache    # Rebuild without layer cache
+robo logs [service]      # Tail logs (omit service = all)
 ```
 
 ### Magento
 
 ```bash
-./robo magento cache:flush
-./robo magento setup:upgrade
-./robo magento indexer:reindex
-./robo composer require vendor/package
-./robo shell               # bash in maintenance container
-./robo shell nginx         # bash in any container
+robo magento cache:flush
+robo magento setup:upgrade
+robo magento indexer:reindex
+robo composer require vendor/package
+robo shell               # bash in maintenance container
+robo shell nginx         # bash in any container
 ```
 
 ### Module workflow
 
 ```bash
 # Link all modules/ into src/app/code/ (run once, or after adding a module)
-./robo module:link
+robo module:link
 
 # Enable a module
-./robo module:enable Aichouchm_ProductRelations
+robo module:enable Aichouchm_ProductRelations
 
 # After editing code — re-compile DI and clean caches
-./robo module:init Aichouchm_ProductRelations
+robo module:init Aichouchm_ProductRelations
 
 # Disable
-./robo module:disable Aichouchm_ProductRelations
+robo module:disable Aichouchm_ProductRelations
 ```
 
 ### Cache
 
 ```bash
-./robo cache:flush
-./robo cache:clean full_page block_html
+robo cache:flush
+robo cache:clean full_page block_html
 ```
 
 ### Database
 
 ```bash
-./robo db:dump                    # → backup.sql.gz
-./robo db:import backup.sql.gz    # Import a dump + cache:flush
+robo db:dump                    # → backup.sql.gz
+robo db:import backup.sql.gz    # Import a dump + cache:flush
 ```
 
 ### Xdebug
@@ -146,22 +156,22 @@ All commands go through `./robo`. Run `./robo list` for the full list.
 Xdebug is baked into the image when built with `XDEBUG_ENABLED=true`, but can be toggled at runtime without rebuilding:
 
 ```bash
-./robo xdebug:on    # Enables, listens on port 9003 (PhpStorm default)
-./robo xdebug:off   # Disables
+robo xdebug:on    # Enables, listens on port 9003 (PhpStorm default)
+robo xdebug:off   # Disables
 ```
 
 ### Code quality
 
 ```bash
-./robo lint          # PHPCS (PSR-12) + PHPStan (level 8) on modules/
-./robo lint:fix      # PHPCBF auto-fix
+robo lint          # PHPCS (PSR-12) + PHPStan (level 8) on modules/
+robo lint:fix      # PHPCBF auto-fix
 ```
 
 ### Full reset
 
 ```bash
-./robo reset                   # Asks for confirmation, wipes DB + volumes, reinstalls
-./robo reset --sample-data     # Same, with sample data
+robo reset                   # Asks for confirmation, wipes DB + volumes, reinstalls
+robo reset --sample-data     # Same, with sample data
 ```
 
 ---
@@ -192,8 +202,8 @@ magento-features/
 │   └── Aichouchm/
 │       └── ProductRelations/ # Example module (see below)
 │
-├── src/                      # Magento root (populated by ./robo install)
-│   └── app/code/             # Module symlinks created by ./robo module:link
+├── src/                      # Magento root (populated by robo install)
+│   └── app/code/             # Module symlinks created by robo module:link
 │
 ├── volumes/
 │   ├── .composer/            # Composer cache (mounted into maintenance)
@@ -211,9 +221,9 @@ magento-features/
 ## Adding a new module
 
 1. Create it in `modules/Vendor/ModuleName/`
-2. Run `./robo module:link` to symlink it into `src/app/code/`
-3. Run `./robo module:enable Vendor_ModuleName`
-4. Run `./robo module:init Vendor_ModuleName`
+2. Run `robo module:link` to symlink it into `src/app/code/`
+3. Run `robo module:enable Vendor_ModuleName`
+4. Run `robo module:init Vendor_ModuleName`
 
 Each module is an independent, self-contained Git project. The `modules/` directory is the portfolio.
 
@@ -251,7 +261,7 @@ DELETE /V1/product-relations/:entityId     # Delete a relation
 1. In PhpStorm: **Preferences → PHP → Servers** — add a server with:
    - Host: `magento.local` (or `localhost`)
    - Path mappings: project `/src` → `/var/www/html`
-2. Run `./robo xdebug:on`
+2. Run `robo xdebug:on`
 3. Start listening in PhpStorm (phone icon)
 4. Set a breakpoint and reload the page
 
@@ -263,7 +273,7 @@ The project uses a `.version` / `.made` system (inspired by production workflow)
 
 - `.version` is committed and incremented when the setup changes
 - `.made` is written by `make` and must match `.version`
-- `./robo up` and `./robo install` will abort with a clear error if they don't match
+- `robo up` and `robo install` will abort with a clear error if they don't match
 
 After a `git pull`:
 ```bash
