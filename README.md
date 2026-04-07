@@ -87,13 +87,22 @@ Everything else in `.env` works out of the box for local development.
 robo up
 ```
 
-That's it. `robo up` detects that Magento isn't installed yet and runs the full installer automatically — pulls Magento via Composer, runs `setup:install` wired to all services, sets developer mode, disables 2FA, and symlinks all modules. URLs are printed when done.
+That's it. On first run, `robo up` detects that Magento isn't installed yet and runs the full installer automatically — clears the web root, pulls Magento via Composer (~600 packages), runs `setup:install` wired to all services, sets developer mode, disables 2FA, fixes file ownership, and symlinks all modules. URLs are printed when done.
+
+Subsequent `robo up` calls start the stack in seconds and re-link modules.
 
 To include sample data (products, categories, customers) on a fresh install, run the installer manually instead:
 
 ```bash
 robo install --sample-data
 ```
+
+> **Port conflicts:** If another project already uses one of the default ports, override in `.env` before starting:
+> ```dotenv
+> OPENSEARCH_PORT=9201
+> MYSQL_PORT=3307
+> REDIS_PORT=6380
+> ```
 
 ---
 
