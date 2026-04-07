@@ -108,7 +108,7 @@ services:
     depends_on:
       - nginx
     tmpfs:
-      - /var/lib/varnish:exec
+      - /var/lib/varnish:exec,mode=0777
     networks:
       - default
 
