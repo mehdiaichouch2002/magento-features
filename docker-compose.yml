@@ -15,12 +15,14 @@ services:
     pull_policy: never
     container_name: magento_phpfpm
     restart: unless-stopped
+    command: php-fpm --allow-to-run-as-root
     environment:
       MAGENTO_MODE: ${MAGENTO_MODE:-developer}
       PHP_MEMORY_LIMIT: ${PHP_MEMORY_LIMIT:-2G}
     volumes:
       - ./src:/var/www/html:delegated
       - ./docker/php/php.ini:/usr/local/etc/php/conf.d/custom.ini:ro
+      - ./docker/php/zz-root.conf:/usr/local/etc/php-fpm.d/zz-root.conf:ro
     depends_on:
       db:
         condition: service_healthy

@@ -189,14 +189,6 @@ class RoboFile extends Tasks
 
         $this->_runInMaintenance(sprintf('php %s/bin/magento cache:flush', self::WEB_ROOT));
 
-        // Composer and Magento CLI run as root inside the container, so src/ is
-        // owned by root on the host. Fix ownership so the host user can write there
-        // (needed for module symlinks, IDE indexing, etc.).
-        $this->say('→ Fixing file ownership…');
-        $uid = function_exists('posix_getuid') ? posix_getuid() : 1000;
-        $gid = function_exists('posix_getgid') ? posix_getgid() : 1000;
-        $this->_runInMaintenance(sprintf('chown -R %d:%d %s', $uid, $gid, self::WEB_ROOT));
-
         $baseUrl  = $env['MAGENTO_BASE_URL'] ?? 'http://magento.local/';
         $adminUri = $env['MAGENTO_ADMIN_URI'] ?? 'admin';
 
