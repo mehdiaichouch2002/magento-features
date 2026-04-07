@@ -67,21 +67,19 @@ sub vcl_recv {
         return (pass);
     }
 
-    # ── Pass if any session/auth cookie is present ────────────────────────────
-    if (req.http.Cookie) {
-        set req.http.Cookie = ";" + req.http.Cookie;
-        set req.http.Cookie = regsuball(req.http.Cookie, "; +", ";");
-        set req.http.Cookie = regsuball(req.http.Cookie,
-            ";(PHPSESSID|private_content_version|form_key|mage-cache-sessid|mage-cache-storage|mage-cache-storage-section-invalidation|MAGE_CACHE_SESSID|section_data_clean|mage-messages|recently_viewed_product|recently_compared_product|product_data_storage)=",
-            "; \\1=");
-        set req.http.Cookie = regsuball(req.http.Cookie, ";[^ ][^;]*", "");
-        set req.http.Cookie = regsuball(req.http.Cookie, "^[; ]+|[; ]+$", "");
+    # ── Pass if any Magento session cookie is present ────────────────────────
+    # Forward the full, unmodified Cookie header to the backend so PHP can
+    # read PHPSESSID, X-Magento-Vary, etc. without corruption.
+    # Note: regsuball backreferences (\\1) are broken in Varnish 7.x —
+    # they output the literal string "\1" instead of the captured group,
+    # which corrupts every cookie name and breaks PHP session parsing.
+    if (req.http.Cookie ~ "(PHPSESSID|private_content_version|X-Magento-Vary|form_key|mage-cache-sessid)=") {
+        return (pass);
+    }
 
-        if (req.http.Cookie == "") {
-            unset req.http.Cookie;
-        } else {
-            return (pass);
-        }
+    # No Magento session cookies — strip everything and serve from cache
+    if (req.http.Cookie) {
+        unset req.http.Cookie;
     }
 
     return (hash);
@@ -96,6 +94,10 @@ sub vcl_hash {
     if (req.http.X-Forwarded-Proto) {
         hash_data(req.http.X-Forwarded-Proto);
     }
+    # Include customer group variation so different groups get separate cache entries
+    if (req.http.cookie ~ "X-Magento-Vary=") {
+        hash_data(regsub(req.http.cookie, "^.*?X-Magento-Vary=([^;]+);*.*$", "\1"));
+    }
     return (lookup);
 }
 
@@ -103,24 +105,49 @@ sub vcl_hash {
 # vcl_backend_response – store and tag objects
 # ─────────────────────────────────────────────────────────────────────────────
 sub vcl_backend_response {
-    # Strip s-maxage from Cache-Control (let Varnish decide TTL)
-    set beresp.http.Cache-Control = regsub(beresp.http.Cache-Control, "s-maxage=[0-9]+", "");
-
-    # Mark as uncacheable if backend says so
-    if (beresp.http.Cache-Control ~ "private" || beresp.http.Cache-Control ~ "no-cache") {
+    # Magento sends two Cache-Control headers:
+    #   Cache-Control: no-cache (browser directive — tells browsers not to cache)
+    #   X-Magento-Cache-Control: max-age=86400,public,s-maxage=86400 (Varnish directive)
+    # Varnish already parsed beresp.ttl from the original Cache-Control (0s).
+    # We use X-Magento-Cache-Control as authoritative and set beresp.ttl explicitly.
+    if (beresp.http.X-Magento-Cache-Control ~ "max-age") {
+        # Mark private responses as uncacheable
+        if (beresp.http.X-Magento-Cache-Control ~ "private") {
+            set beresp.uncacheable = true;
+            set beresp.ttl = 120s;
+            return (deliver);
+        }
+        # Set Varnish TTL from X-Magento-Cache-Control max-age
+        set beresp.ttl = std.duration(
+            regsub(beresp.http.X-Magento-Cache-Control, ".*max-age=([0-9]+).*", "\1") + "s",
+            86400s);
+        # Update Cache-Control header sent to browsers (strip s-maxage)
+        set beresp.http.Cache-Control = regsub(beresp.http.X-Magento-Cache-Control,
+            ",?\s*s-maxage=[0-9]+", "");
+    } else {
+        # No Magento cache hint — don't cache
         set beresp.uncacheable = true;
         set beresp.ttl = 120s;
         return (deliver);
     }
 
-    # Remove cookies from cached responses
-    unset beresp.http.Set-Cookie;
-
-    # Default TTL if backend doesn't specify
-    if (beresp.ttl <= 0s) {
-        set beresp.ttl = 120s;
+    # Don't cache non-200/404 responses
+    if (beresp.status != 200 && beresp.status != 404) {
         set beresp.uncacheable = true;
+        set beresp.ttl = 120s;
+        return (deliver);
     }
+
+    # Don't cache pages with TTL=0 (e.g. login, account pages)
+    if (beresp.ttl <= 0s) {
+        set beresp.uncacheable = true;
+        set beresp.ttl = 120s;
+        return (deliver);
+    }
+
+    # Remove Set-Cookie from responses that ARE being cached so session
+    # cookies don't get stuck in cached objects and leak to other users
+    unset beresp.http.Set-Cookie;
 
     return (deliver);
 }
