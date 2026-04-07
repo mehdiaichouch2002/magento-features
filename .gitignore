@@ -3,6 +3,7 @@
 
 # ─── Claude Code ──────────────────────────────────────────────────────────────
 .claude/
+CLAUDE.md
 
 # ─── Magento source (composer-managed, not committed) ────────────────────────
 src/vendor/

@@ -1,5 +1,3 @@
-version: "3.9"
-
 networks:
   default:
     name: magento-lab
@@ -14,6 +12,7 @@ services:
       args:
         XDEBUG_ENABLED: ${XDEBUG_ENABLED:-false}
     image: magento-lab/phpfpm:latest
+    pull_policy: never
     container_name: magento_phpfpm
     restart: unless-stopped
     environment:
@@ -25,10 +24,13 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      elasticsearch:
-        condition: service_healthy
       redis:
         condition: service_healthy
+      # elasticsearch is NOT a hard dependency for PHP-FPM to start.
+      # It only needs to be ready for catalog search. Removing it here
+      # cuts startup time by 30-60 s (ES warm-up) on every robo up.
+      elasticsearch:
+        condition: service_started
     networks:
       - default
 
@@ -36,7 +38,12 @@ services:
   # All bin/magento, composer, cron commands run here.
   # Shares the Magento volume with php via volumes_from.
   maintenance:
+    build:
+      context: ./docker/php
+      args:
+        XDEBUG_ENABLED: ${XDEBUG_ENABLED:-false}
     image: magento-lab/phpfpm:latest
+    pull_policy: never
     container_name: magento_maintenance
     restart: unless-stopped
     command: tail -f /dev/null
@@ -61,6 +68,7 @@ services:
   # Listens on 8080 (Varnish backend). Direct access via host port 8080.
   nginx:
     image: nginx:1.25-alpine
+    pull_policy: missing
     container_name: magento_nginx
     restart: unless-stopped
     ports:
@@ -81,6 +89,7 @@ services:
   # Test with/without cache: port 80 (cached) vs port 8080 (direct).
   varnish:
     image: varnish:7.4-alpine
+    pull_policy: missing
     container_name: magento_varnish
     restart: unless-stopped
     ports:
@@ -106,6 +115,7 @@ services:
   # ─── MySQL / MariaDB ─────────────────────────────────────────────────────
   db:
     image: mariadb:10.6
+    pull_policy: missing
     container_name: magento_db
     restart: unless-stopped
     environment:
@@ -127,21 +137,24 @@ services:
       - "127.0.0.1:${MYSQL_PORT:-3306}:3306"
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-magento}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 20s
     networks:
       - default
 
   # ─── OpenSearch ──────────────────────────────────────────────────────────
   elasticsearch:
     image: opensearchproject/opensearch:2.12.0
+    pull_policy: missing
     container_name: magento_search
     restart: unless-stopped
     environment:
       discovery.type: single-node
       OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
       plugins.security.disabled: "true"
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
       bootstrap.memory_lock: "true"
     ulimits:
       memlock:
@@ -156,15 +169,17 @@ services:
       - "${OPENSEARCH_PORT:-9200}:9200"
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health | grep -qE '\"status\":\"(green|yellow)\"'"]
-      interval: 15s
-      timeout: 10s
-      retries: 10
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 45s
     networks:
       - default
 
   # ─── Redis ───────────────────────────────────────────────────────────────
   redis:
     image: redis:7.2-alpine
+    pull_policy: missing
     container_name: magento_redis
     restart: unless-stopped
     command: >
@@ -173,7 +188,7 @@ services:
         --maxmemory-policy allkeys-lru
         --save ""
         --appendonly no
-        --loglevel verbose
+        --loglevel notice
     ports:
       - "${REDIS_PORT:-6379}:6379"
     healthcheck:
@@ -181,12 +196,14 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+      start_period: 5s
     networks:
       - default
 
   # ─── RabbitMQ ────────────────────────────────────────────────────────────
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
+    pull_policy: missing
     container_name: magento_rabbitmq
     restart: unless-stopped
     environment:
@@ -204,6 +221,7 @@ services:
   # ─── Mailhog ─────────────────────────────────────────────────────────────
   mailhog:
     image: mailhog/mailhog:latest
+    pull_policy: missing
     container_name: magento_mail
     restart: unless-stopped
     ports:

@@ -12,7 +12,12 @@ use Robo\Tasks;
  */
 class RoboFile extends Tasks
 {
-    // ─── Container names ──────────────────────────────────────────────────────
+    // ─── Service names (used with docker compose exec/ps) ─────────────────────
+    private const PHP_SERVICE         = 'php';
+    private const MAINTENANCE_SERVICE = 'maintenance';
+    private const DB_SERVICE          = 'db';
+
+    // ─── Container names (used with docker inspect / docker cp) ───────────────
     private const PHP_CONTAINER         = 'magento_phpfpm';
     private const MAINTENANCE_CONTAINER = 'magento_maintenance';
     private const DB_CONTAINER          = 'magento_db';
@@ -25,12 +30,54 @@ class RoboFile extends Tasks
     // ─────────────────────────────────────────────────────────────────────────
 
     /**
-     * Start all containers (builds images on first run)
+     * Start all containers and make them ready for development.
+     *
+     * On a fresh clone (no src/app/etc/env.php) this will automatically run
+     * robo install if the Magento repo credentials are already set in .env.
+     * Modules in modules/ are always symlinked before returning.
      */
     public function up(): void
     {
         $this->_checkmade();
-        $this->_callDockerCompose(['up', '-d', '--build']);
+
+        if ($this->_callDockerCompose(['up', '-d']) !== 0) {
+            $this->yell('docker compose up failed — fix the error above before continuing.');
+            return;
+        }
+
+        $installed = file_exists(__DIR__ . '/src/app/etc/env.php');
+
+        if (!$installed) {
+            $env    = $this->_readEnv();
+            $pubKey = $env['MAGENTO_REPO_PUBLIC_KEY'] ?? '';
+
+            if ($pubKey !== '') {
+                $this->say('→ First-time setup: credentials found, waiting for services…');
+                $this->_waitForContainer(self::MAINTENANCE_SERVICE);
+                $this->install();
+                // Link modules after install so app/code/ exists and is writable.
+                $this->moduleLink();
+            } else {
+                $this->say('');
+                $this->say('  Containers are up. Magento is not installed yet.');
+                $this->say('  Add your repo keys to .env, then run:');
+                $this->say('    robo install');
+            }
+
+            return;
+        }
+
+        // Already installed — re-link modules and print where to go.
+        $this->moduleLink();
+
+        $baseUrl  = $this->_readEnv()['MAGENTO_BASE_URL'] ?? 'http://magento.local/';
+        $adminUri = $this->_readEnv()['MAGENTO_ADMIN_URI'] ?? 'admin';
+        $this->say('');
+        $this->say('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        $this->say("  Frontend : {$baseUrl}");
+        $this->say("  Admin    : {$baseUrl}{$adminUri}");
+        $this->say("  Bypass   : http://localhost:8080  (no Varnish)");
+        $this->say('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     }
 
     /**
@@ -38,7 +85,7 @@ class RoboFile extends Tasks
      */
     public function down(): void
     {
-        $this->_callDockerCompose(['down', '--remove-orphans']);
+        $this->_callDockerCompose(['down']);
     }
 
     /**
@@ -74,7 +121,7 @@ class RoboFile extends Tasks
         if ($service !== '') {
             $args[] = $service;
         }
-        $this->_callDockerCompose($args, interactive: true);
+        $this->_callDockerCompose($args, true);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -96,6 +143,9 @@ class RoboFile extends Tasks
         $env = $this->_readEnv();
         $this->_assertRepoKeys($env);
 
+        $this->say('→ Preparing web root for fresh install…');
+        $this->_runInMaintenance('find /var/www/html -mindepth 1 -maxdepth 1 -exec rm -rf {} +');
+
         $this->say('→ Downloading Magento via Composer…');
         $this->_runInMaintenance(
             sprintf(
@@ -107,7 +157,8 @@ class RoboFile extends Tasks
                 $env['MAGENTO_VERSION'] ?? '2.4.7',
                 self::WEB_ROOT
             ),
-            composerAuth: $this->_buildComposerAuth($env)
+            null,
+            $this->_buildComposerAuth($env)
         );
 
         $this->say('→ Running setup:install…');
@@ -117,7 +168,8 @@ class RoboFile extends Tasks
             $this->say('→ Installing sample data…');
             $this->_runInMaintenance(
                 sprintf('php %s/bin/magento sampledata:deploy', self::WEB_ROOT),
-                composerAuth: $this->_buildComposerAuth($env)
+                null,
+                $this->_buildComposerAuth($env)
             );
             $this->_runInMaintenance(
                 sprintf('php %s/bin/magento setup:upgrade --no-interaction', self::WEB_ROOT)
@@ -136,6 +188,14 @@ class RoboFile extends Tasks
         ));
 
         $this->_runInMaintenance(sprintf('php %s/bin/magento cache:flush', self::WEB_ROOT));
+
+        // Composer and Magento CLI run as root inside the container, so src/ is
+        // owned by root on the host. Fix ownership so the host user can write there
+        // (needed for module symlinks, IDE indexing, etc.).
+        $this->say('→ Fixing file ownership…');
+        $uid = function_exists('posix_getuid') ? posix_getuid() : 1000;
+        $gid = function_exists('posix_getgid') ? posix_getgid() : 1000;
+        $this->_runInMaintenance(sprintf('chown -R %d:%d %s', $uid, $gid, self::WEB_ROOT));
 
         $baseUrl  = $env['MAGENTO_BASE_URL'] ?? 'http://magento.local/';
         $adminUri = $env['MAGENTO_ADMIN_URI'] ?? 'admin';
@@ -200,7 +260,9 @@ class RoboFile extends Tasks
         $cmd = implode(' ', array_map('escapeshellarg', $args));
         $this->_runInMaintenance(
             sprintf('php %s/bin/magento %s', self::WEB_ROOT, $cmd),
-            interactive: true
+            null,
+            null,
+            true
         );
     }
 
@@ -215,9 +277,9 @@ class RoboFile extends Tasks
         $cmd = implode(' ', array_map('escapeshellarg', $args));
         $this->_runInMaintenance(
             sprintf('composer %s', $cmd),
-            workdir: self::WEB_ROOT,
-            composerAuth: $this->_buildComposerAuth($env),
-            interactive: true
+            self::WEB_ROOT,
+            $this->_buildComposerAuth($env),
+            true
         );
     }
 
@@ -228,7 +290,7 @@ class RoboFile extends Tasks
      */
     public function shell(string $service = 'maintenance'): void
     {
-        $this->_callDockerCompose(['exec', $service, 'bash'], interactive: true);
+        $this->_callDockerCompose(['exec', $service, 'bash'], true);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -273,7 +335,7 @@ class RoboFile extends Tasks
             $env['MYSQL_DATABASE'] ?? 'magento'
         );
 
-        $this->_callDockerCompose(['exec', self::DB_CONTAINER, 'bash', '-c', $dumpCmd]);
+        $this->_callDockerCompose(['exec', self::DB_SERVICE, 'bash', '-c', $dumpCmd]);
         $this->_exec(sprintf('docker cp %s:/tmp/dump.sql.gz %s', self::DB_CONTAINER, $file));
         $this->say("Dump saved to: $file");
     }
@@ -304,7 +366,7 @@ class RoboFile extends Tasks
                 $env['MYSQL_USER'] ?? 'magento', $env['MYSQL_PASSWORD'] ?? 'magento', $env['MYSQL_DATABASE'] ?? 'magento');
 
         $this->say('→ Importing…');
-        $this->_callDockerCompose(['exec', self::DB_CONTAINER, 'bash', '-c', $importCmd]);
+        $this->_callDockerCompose(['exec', self::DB_SERVICE, 'bash', '-c', $importCmd]);
 
         $this->say('→ Flushing caches…');
         $this->cacheFlush();
@@ -322,7 +384,7 @@ class RoboFile extends Tasks
     {
         $ini = '/usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini';
         $this->_callDockerCompose([
-            'exec', self::PHP_CONTAINER, 'bash', '-c',
+            'exec', self::PHP_SERVICE, 'bash', '-c',
             "[ -f {$ini}.disabled ] && mv {$ini}.disabled {$ini}; kill -USR2 1 2>/dev/null || true",
         ]);
         $this->say('Xdebug enabled — listening on port 9003.');
@@ -335,7 +397,7 @@ class RoboFile extends Tasks
     {
         $ini = '/usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini';
         $this->_callDockerCompose([
-            'exec', self::PHP_CONTAINER, 'bash', '-c',
+            'exec', self::PHP_SERVICE, 'bash', '-c',
             "[ -f {$ini} ] && mv {$ini} {$ini}.disabled; kill -USR2 1 2>/dev/null || true",
         ]);
         $this->say('Xdebug disabled.');
@@ -418,7 +480,38 @@ class RoboFile extends Tasks
     // ─────────────────────────────────────────────────────────────────────────
 
     /**
+     * Block until a service is exec-ready (max $maxSeconds).
+     * Probes via `docker compose exec -T <service> true` — the same mechanism
+     * that install() will use, so if this succeeds, exec is guaranteed to work.
+     */
+    protected function _waitForContainer(string $service, int $maxSeconds = 90): void
+    {
+        $bin   = $this->_getDockerComposeBin();
+        $start = time();
+        $this->say("  Waiting for {$service} to be exec-ready…");
+
+        while (time() - $start < $maxSeconds) {
+            exec(
+                sprintf('%s exec -T %s true 2>/dev/null', $bin, escapeshellarg($service)),
+                $out,
+                $code
+            );
+
+            if ($code === 0) {
+                return;
+            }
+
+            sleep(3);
+            $out = [];
+        }
+
+        $this->yell("Timed out waiting for {$service}. Run 'robo install' manually once services are ready.");
+        exit(1);
+    }
+
+    /**
      * Run a command in the maintenance container.
+     * Returns the exit code; exits the process with a yell on non-zero by default.
      *
      * @param string|null $composerAuth  JSON string for COMPOSER_AUTH env var
      */
@@ -426,49 +519,88 @@ class RoboFile extends Tasks
         string $command,
         ?string $workdir = null,
         ?string $composerAuth = null,
-        bool $interactive = false
-    ): void {
-        $envPrefix = $composerAuth
-            ? sprintf("COMPOSER_AUTH='%s' ", addslashes($composerAuth))
-            : '';
+        bool $interactive = false,
+        bool $failOnError = true
+    ): int {
+        $execArgs = ['exec'];
+        $execArgs[] = $interactive ? '-it' : '-T';
 
-        $options = $interactive ? ['-it'] : ['-T'];
         if ($workdir !== null) {
-            $options[] = "-w $workdir";
+            $execArgs[] = '-w';
+            $execArgs[] = $workdir;
         }
 
-        $this->_callDockerCompose(
-            array_merge(
-                ['exec'],
-                $options,
-                [self::MAINTENANCE_CONTAINER, 'bash', '-c', $envPrefix . $command]
-            ),
-            interactive: $interactive
-        );
+        if ($composerAuth !== null) {
+            $execArgs[] = '-e';
+            $execArgs[] = 'COMPOSER_AUTH=' . $composerAuth;
+        }
+
+        $execArgs[] = self::MAINTENANCE_SERVICE;
+        $execArgs[] = 'bash';
+        $execArgs[] = '-c';
+        $execArgs[] = $command;
+
+        $code = $this->_callDockerCompose($execArgs, $interactive);
+
+        if ($code !== 0 && $failOnError) {
+            $this->yell("Command failed (exit $code) — see output above.");
+            exit($code);
+        }
+
+        return $code;
     }
 
     /**
-     * Run a docker compose command.
+     * Run a docker compose command. Returns the exit code.
+     *
+     * Non-flag arguments are shell-quoted so that values containing spaces
+     * (bash scripts, file paths, env var assignments) are passed as single tokens.
+     * Flag-style arguments (starting with -) are passed through unquoted.
      */
-    protected function _callDockerCompose(array $args, bool $interactive = false): void
+    protected function _callDockerCompose(array $args, bool $interactive = false): int
     {
-        $bin     = $this->_getDockerComposeBin();
-        $command = $bin . ' ' . implode(' ', $args);
+        $parts = [$this->_getDockerComposeBin()];
+        foreach ($args as $arg) {
+            $parts[] = (strncmp((string) $arg, '-', 1) === 0) ? (string) $arg : escapeshellarg((string) $arg);
+        }
+        $command = implode(' ', $parts);
 
         if ($interactive) {
-            $this->taskExec($command)->run();
-        } else {
-            $this->_exec($command);
+            $result = $this->taskExec($command)->run();
+            return $result->getExitCode();
         }
+
+        $result = $this->_exec($command);
+        return $result->getExitCode();
     }
 
     /**
-     * Auto-detect `docker compose` (plugin) vs legacy `docker-compose`.
+     * Returns the Docker Compose binary path.
+     *
+     * Prefers the compose plugin invoked directly (bypasses the docker CLI
+     * plugin-discovery mechanism, which is unreliable in non-interactive
+     * shell contexts). Falls back to `docker compose` if no plugin is found.
      */
     protected function _getDockerComposeBin(): string
     {
-        exec('docker compose version 2>/dev/null', $output, $returnCode);
-        return $returnCode === 0 ? 'docker compose' : 'docker-compose';
+        static $bin = null;
+        if ($bin !== null) {
+            return $bin;
+        }
+        $pluginPaths = [
+            '/usr/libexec/docker/cli-plugins/docker-compose',
+            '/usr/local/lib/docker/cli-plugins/docker-compose',
+            '/usr/lib/docker/cli-plugins/docker-compose',
+            '/usr/local/libexec/docker/cli-plugins/docker-compose',
+        ];
+        foreach ($pluginPaths as $path) {
+            if (is_executable($path)) {
+                $bin = $path;
+                return $bin;
+            }
+        }
+        $bin = 'docker compose';
+        return $bin;
     }
 
     /**
@@ -498,7 +630,7 @@ class RoboFile extends Tasks
      */
     private function _buildSetupInstallCommand(array $env): string
     {
-        $e = static fn(string $key, string $default) use ($env): string => $env[$key] ?? $default;
+        $e = static fn(string $key, string $default): string => $env[$key] ?? $default;
 
         return sprintf(
             'php %s/bin/magento setup:install'
@@ -541,7 +673,7 @@ class RoboFile extends Tasks
 
         $vars = [];
         foreach (file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
-            if (str_starts_with(trim($line), '#') || !str_contains($line, '=')) {
+            if (strncmp(trim($line), '#', 1) === 0 || strpos($line, '=') === false) {
                 continue;
             }
             [$key, $value] = explode('=', $line, 2);

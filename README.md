@@ -81,17 +81,19 @@ Get keys here (free): https://commercemarketplace.adobe.com/customer/accessKeys/
 
 Everything else in `.env` works out of the box for local development.
 
-### 3. Start and install
+### 3. Start
 
 ```bash
 robo up
-robo install
-
-# With sample data (products, categories, customers):
-robo install --sample-data
 ```
 
-That's it. The installer pulls Magento via Composer, runs `setup:install` wired to all services, sets developer mode, and disables 2FA.
+That's it. `robo up` detects that Magento isn't installed yet and runs the full installer automatically — pulls Magento via Composer, runs `setup:install` wired to all services, sets developer mode, disables 2FA, and symlinks all modules. URLs are printed when done.
+
+To include sample data (products, categories, customers) on a fresh install, run the installer manually instead:
+
+```bash
+robo install --sample-data
+```
 
 ---
 
@@ -102,10 +104,10 @@ All commands go through `robo`. Run `robo list` for the full list.
 ### Stack
 
 ```bash
-robo up                  # Start (builds images on first run)
+robo up                  # Start (auto-installs + auto-links modules on first run)
 robo down                # Stop containers, keep volumes
 robo ps                  # Container status
-robo build               # Rebuild images
+robo build               # Rebuild images (run this after changing the Dockerfile)
 robo build --no-cache    # Rebuild without layer cache
 robo logs [service]      # Tail logs (omit service = all)
 ```
@@ -124,7 +126,9 @@ robo shell nginx         # bash in any container
 ### Module workflow
 
 ```bash
-# Link all modules/ into src/app/code/ (run once, or after adding a module)
+# Link all modules/ into src/app/code/
+# (called automatically by robo up — only needed manually after adding a module
+#  without restarting the stack)
 robo module:link
 
 # Enable a module
@@ -221,9 +225,8 @@ magento-features/
 ## Adding a new module
 
 1. Create it in `modules/Vendor/ModuleName/`
-2. Run `robo module:link` to symlink it into `src/app/code/`
-3. Run `robo module:enable Vendor_ModuleName`
-4. Run `robo module:init Vendor_ModuleName`
+2. Run `robo module:enable Vendor_ModuleName` (symlinks are created automatically by `robo up`; if the stack is already running, run `robo module:link` first)
+3. Run `robo module:init Vendor_ModuleName`
 
 Each module is an independent, self-contained Git project. The `modules/` directory is the portfolio.
 

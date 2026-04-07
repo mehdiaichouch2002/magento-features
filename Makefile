@@ -17,8 +17,7 @@ init: ensure-composer uservolumes dot-env elasticsearch-data-folder robo-bin upd
 	@echo "    1.  Add your repo keys to .env"
 	@echo "        MAGENTO_REPO_PUBLIC_KEY and MAGENTO_REPO_PRIVATE_KEY"
 	@echo "        https://commercemarketplace.adobe.com/customer/accessKeys/"
-	@echo "    2.  ./robo up"
-	@echo "    3.  ./robo install"
+	@echo "    2.  ./robo up  (auto-installs Magento when keys are set)"
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # Re-run composer install and bump .made (run after git pull)
@@ -51,7 +50,7 @@ composer-install: ensure-composer
 # ─── Robo wrapper script ──────────────────────────────────────────────────────
 robo-bin: composer-install
 	@if [ ! -f ./robo ]; then \
-		printf '#!/usr/bin/env bash\nexec "$(dirname "$$0")/bin/robo" "$$@"\n' > ./robo; \
+		printf '#!/usr/bin/env bash\nexec "$$(dirname "$$0")/bin/robo" "$$@"\n' > ./robo; \
 		chmod +x ./robo; \
 		echo "  Created: ./robo wrapper"; \
 	fi
