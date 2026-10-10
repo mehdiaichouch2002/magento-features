@@ -3,7 +3,8 @@
 # host requirement for this project is Docker itself.
 FROM php:8.4-cli-alpine
 
-RUN apk add --no-cache bash git unzip docker-cli docker-cli-compose
+# buildx gives compose BuildKit; without it builds fall back to the legacy builder.
+RUN apk add --no-cache bash git unzip docker-cli docker-cli-compose docker-cli-buildx
 
 COPY --from=composer:2.10 /usr/bin/composer /usr/local/bin/composer
 

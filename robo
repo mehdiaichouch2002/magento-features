@@ -7,7 +7,7 @@
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROBO_IMAGE="magento-lab/robo:1"
+ROBO_IMAGE="magento-lab/robo:2"
 
 host_php_ok() {
     command -v php >/dev/null 2>&1 \

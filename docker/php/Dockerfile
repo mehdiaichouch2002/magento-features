@@ -13,10 +13,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # ─── PHP extensions (Magento 2.4.9 requirements) ──────────────────────────────
 # install-php-extensions picks the right build deps and PECL versions for the
 # current PHP release, so bumping PHP_VERSION needs no changes here.
-ADD --chmod=0755 \
-    https://github.com/mlocati/docker-php-extension-installer/releases/download/2.12.0/install-php-extensions \
+ADD https://github.com/mlocati/docker-php-extension-installer/releases/download/2.12.0/install-php-extensions \
     /usr/local/bin/
-RUN install-php-extensions \
+RUN chmod +x /usr/local/bin/install-php-extensions \
+    && install-php-extensions \
         bcmath \
         calendar \
         exif \
