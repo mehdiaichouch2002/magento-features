@@ -13,7 +13,6 @@ backend default {
 
 # ─── ACL: hosts allowed to send PURGE/BAN requests ───────────────────────────
 acl purge {
-    "localhost";
     "127.0.0.0/8";
     "10.0.0.0/8";
     "172.16.0.0/12";
