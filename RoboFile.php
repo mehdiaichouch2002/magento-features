@@ -162,15 +162,7 @@ class RoboFile extends Tasks
         $this->_runInMaintenance($this->_buildSetupInstallCommand($env));
 
         if ($opts['sample-data']) {
-            $this->say('→ Installing sample data…');
-            $this->_runInMaintenance(
-                sprintf('php %s/bin/magento sampledata:deploy', self::WEB_ROOT),
-                null,
-                $this->_buildComposerAuth($env)
-            );
-            $this->_runInMaintenance(
-                sprintf('php %s/bin/magento setup:upgrade --no-interaction', self::WEB_ROOT)
-            );
+            $this->_deploySampleData($env);
         }
 
         $this->say('→ Enabling developer mode…');
@@ -199,6 +191,31 @@ class RoboFile extends Tasks
             ));
         }
 
+        $this->_runInMaintenance(sprintf('php %s/bin/magento cache:flush', self::WEB_ROOT));
+
+        $this->_printUrls($env);
+    }
+
+    /**
+     * Add Magento sample data (Luma demo catalog) to an existing install
+     *
+     * Example: ./robo sample:data
+     */
+    public function sampleData(): void
+    {
+        $this->_checkmade();
+
+        if (!file_exists(__DIR__ . '/src/app/etc/env.php')) {
+            $this->yell('Magento is not installed yet — run: robo up --sample-data');
+            exit(1);
+        }
+
+        $env = $this->_readEnv();
+        $this->_assertRepoKeys($env);
+        $this->_deploySampleData($env);
+
+        $this->say('→ Reindexing and flushing caches…');
+        $this->_runInMaintenance(sprintf('php %s/bin/magento indexer:reindex', self::WEB_ROOT));
         $this->_runInMaintenance(sprintf('php %s/bin/magento cache:flush', self::WEB_ROOT));
 
         $this->_printUrls($env);
@@ -595,6 +612,24 @@ class RoboFile extends Tasks
     protected function _composeUpAndWait(): bool
     {
         return $this->_callDockerCompose(['up', '-d', '--wait', '--wait-timeout', '600']) === 0;
+    }
+
+    /**
+     * Require the sample-data packages and install their data.
+     */
+    private function _deploySampleData(array $env): void
+    {
+        $this->say('→ Downloading sample data packages…');
+        $this->_runInMaintenance(
+            sprintf('php %s/bin/magento sampledata:deploy', self::WEB_ROOT),
+            self::WEB_ROOT,
+            $this->_buildComposerAuth($env)
+        );
+
+        $this->say('→ Importing sample data (setup:upgrade, takes several minutes)…');
+        $this->_runInMaintenance(
+            sprintf('php %s/bin/magento setup:upgrade --no-interaction', self::WEB_ROOT)
+        );
     }
 
     private function _hasModules(): bool

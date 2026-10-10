@@ -70,6 +70,7 @@ Tip: `alias robo=./robo`
 ```bash
 ./robo up                  # Start (installs Magento automatically on first run)
 ./robo up --sample-data    # First run only: also install sample data
+./robo sample:data         # Add sample data to an existing install
 ./robo down                # Stop containers, keep data
 ./robo ps                  # Container status
 ./robo logs [service]      # Tail logs (omit service = all)
