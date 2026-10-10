@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Robo launcher.
+#   - Uses host PHP (>= 8.2) when available: fastest.
+#   - Otherwise runs Robo inside a small container that talks to the host
+#     Docker daemon, so the host only needs Docker.
+# Force the container path with: ROBO_IN_DOCKER=1 ./robo <command>
+set -euo pipefail
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROBO_IMAGE="magento-lab/robo:1"
+
+host_php_ok() {
+    command -v php >/dev/null 2>&1 \
+        && php -r 'exit(PHP_VERSION_ID >= 80200 ? 0 : 1);' >/dev/null 2>&1
+}
+
+if [ ! -f "$DIR/bin/robo" ]; then
+    echo "Robo is not installed yet. Run: ./setup" >&2
+    exit 1
+fi
+
+if [ "${ROBO_IN_DOCKER:-0}" != "1" ] && host_php_ok; then
+    exec php "$DIR/bin/robo" --load-from "$DIR" "$@"
+fi
+
+if ! docker image inspect "$ROBO_IMAGE" >/dev/null 2>&1; then
+    echo "→ Building the Robo toolbox image (one-time)…" >&2
+    docker build -q -t "$ROBO_IMAGE" "$DIR/docker/robo" >/dev/null
+fi
+
+tty_flags=(-i)
+[ -t 0 ] && [ -t 1 ] && tty_flags=(-it)
+
+# The project is mounted at the same absolute path as on the host so that
+# docker compose resolves bind-mount paths (./src, ./modules…) correctly.
+exec docker run --rm "${tty_flags[@]}" \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    -v "$DIR:$DIR" \
+    -w "$DIR" \
+    "$ROBO_IMAGE" \
+    php "$DIR/bin/robo" --load-from "$DIR" "$@"

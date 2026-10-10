@@ -1,190 +1,159 @@
 # Magento 2 Innovation Lab
 
-A fully Dockerized Magento 2 development environment built as a personal sandbox for developing, testing, and refining production-quality custom modules.
+A fully Dockerized **Magento Open Source 2.4.9** development environment. One command gets you a working store with Varnish, OpenSearch, Valkey, RabbitMQ and a mail catcher.
 
-The stack is inspired by real-world production setups: a dedicated maintenance container for all CLI work, Varnish for full-page cache testing, and [Robo](https://robo.li/) as the single task runner replacing all shell scripts.
+```bash
+git clone https://github.com/mehdiaichouch2002/magento-features.git
+cd magento-features
+./setup
+```
 
----
-
-## Stack
-
-| Service | Image | Purpose |
-|---|---|---|
-| `php` | PHP 8.3-FPM (custom) | Serves HTTP requests only |
-| `maintenance` | same image | CLI: `bin/magento`, `composer`, cron |
-| `nginx` | nginx:1.25-alpine | PHP-FPM proxy |
-| `varnish` | varnish:7.4-alpine | HTTP cache layer |
-| `db` | mariadb:10.6 | Database |
-| `elasticsearch` | opensearch:2.12 | Search engine |
-| `redis` | redis:7.2-alpine | Cache / FPC / Sessions |
-| `rabbitmq` | rabbitmq:3.13-management | Async message queue |
-| `mailhog` | mailhog | Catches all outbound email |
-
-### Port map
-
-| Port | Service | Notes |
-|---|---|---|
-| `80` | Varnish | Full-page cache enabled |
-| `8080` | Nginx | Direct PHP access, bypass cache |
-| `8025` | Mailhog UI | |
-| `15672` | RabbitMQ UI | |
-| `3306` | MySQL | `127.0.0.1` only |
-| `9200` | OpenSearch | |
-| `6379` | Redis | |
-
-All ports can be overridden in `.env` (e.g. `MYSQL_PORT=3307`).
-
-> **Dev tip:** Use port `8080` during active development (no cache friction). Switch to port `80` when testing full-page cache behaviour.
+That's it. `./setup` checks Docker, creates `.env`, asks for your (free) Magento keys, starts the stack and installs Magento. When it finishes, open **http://magento.localhost/**.
 
 ---
 
 ## Requirements
 
-- Docker Engine 24+ with the Compose plugin (`docker compose`)
-- PHP 8.2+ on the host (for Robo — downloaded automatically if Composer is missing)
-- A free [Adobe Commerce Marketplace account](https://commercemarketplace.adobe.com/customer/accessKeys/) for the repo credentials
+| | |
+|---|---|
+| **Docker** | Docker Desktop or Docker Engine 24+ with the Compose v2 plugin. Nothing else is needed: no PHP, Composer or `make` on the host. |
+| **Resources** | 4 CPUs, 8 GB RAM for Docker, about 10 GB of disk |
+| **Magento keys** | Free: [commercemarketplace.adobe.com → Access Keys](https://commercemarketplace.adobe.com/customer/accessKeys/). Magento packages come from `repo.magento.com`, which needs authentication even for Open Source. |
 
-> **Why credentials?** Magento packages are served from `repo.magento.com`, which requires authentication even for the free Community Edition. The account is free and takes 2 minutes to create.
+**Windows:** use [WSL2](https://docs.docker.com/desktop/features/wsl/). Clone the repo **inside** the Linux filesystem (e.g. `~/projects`), not under `/mnt/c`. Magento on Windows-mounted folders is unusably slow.
 
----
-
-## Quick start
-
-### 1. Clone and initialise
-
-```bash
-git clone https://github.com/your-username/magento-features.git
-cd magento-features
-make
-```
-
-`make` does everything once: installs Robo (downloads Composer locally if needed), creates `volumes/`, copies `.env.example → .env`, and writes the `.made` version file.
-
-Add the `robo` shell alias so you can type `robo` instead of `./robo`:
-
-```bash
-# zsh
-echo "alias robo='./robo'" >> ~/.zshrc && source ~/.zshrc
-
-# bash
-echo "alias robo='./robo'" >> ~/.bashrc && source ~/.bashrc
-```
-
-### 2. Add your credentials to `.env`
-
-Open `.env` and fill in the two lines at the top:
-
-```dotenv
-MAGENTO_REPO_PUBLIC_KEY=your-public-key
-MAGENTO_REPO_PRIVATE_KEY=your-private-key
-```
-
-Get keys here (free): https://commercemarketplace.adobe.com/customer/accessKeys/
-
-Everything else in `.env` works out of the box for local development.
-
-### 3. Add the local domain
-
-```bash
-echo "127.0.0.1 magento.local" | sudo tee -a /etc/hosts
-```
-
-### 4. Start
-
-```bash
-robo up
-```
-
-On first run, `robo up` detects that Magento isn't installed and runs the full installer automatically — downloads Magento via Composer, runs `setup:install` wired to all services, enables developer mode, disables 2FA, and symlinks all modules. URLs are printed when done.
-
-Subsequent `robo up` calls bring the stack up in seconds.
-
-To include sample data on a fresh install, run instead:
-
-```bash
-robo install --sample-data
-```
+**Linux:** OpenSearch wants `sudo sysctl -w vm.max_map_count=262144`. `./setup` warns you if it's too low.
 
 ---
 
-## Robo — task runner
+## Stack
 
-All commands go through `robo`. Run `robo list` for the full list.
+Versions follow the official [Magento 2.4.9 system requirements](https://experienceleague.adobe.com/en/docs/commerce-operations/installation-guide/system-requirements). All of them are set in `.env`.
+
+| Service | Version | Purpose |
+|---|---|---|
+| `php` | PHP 8.5-FPM (custom image) | Serves HTTP requests only |
+| `maintenance` | same image | CLI: `bin/magento`, Composer 2.10, Node 22, cron |
+| `nginx` | 1.30 | PHP-FPM proxy |
+| `varnish` | 8.0 | HTTP cache layer |
+| `db` | MariaDB 12.3 | Database |
+| `opensearch` | OpenSearch 3 | Catalog search |
+| `valkey` | Valkey 9 | Cache, page cache, sessions (Redis-compatible) |
+| `rabbitmq` | RabbitMQ 4.3 | Async message queue |
+| `mailpit` | Mailpit | Catches every outbound email |
+
+### URLs and ports
+
+| URL | What |
+|---|---|
+| http://magento.localhost/ | Storefront through Varnish |
+| http://magento.localhost/admin | Admin: `admin` / `Admin123!` (set in `.env`) |
+| http://magento.localhost:8080/ | Direct to Nginx, bypassing Varnish |
+| http://localhost:8025 | Mailpit inbox |
+| http://localhost:15672 | RabbitMQ UI |
+| `127.0.0.1:3306` / `:9200` / `:6379` | MariaDB / OpenSearch / Valkey (localhost only) |
+
+`*.localhost` resolves to `127.0.0.1` automatically in browsers and curl, so you don't need to edit `/etc/hosts`. Any port can be changed in `.env` (e.g. `VARNISH_PORT=8000` if port 80 is taken).
+
+> **Dev tip:** Use port `8080` while coding (no cache). Switch to port `80` to test full-page cache behaviour.
+
+---
+
+## Day-to-day: `./robo`
+
+All commands go through `./robo` (`./robo list` shows them all). It uses your host PHP if you have 8.2+. Otherwise it runs inside a small container, so it works with Docker alone.
+
+Tip: `alias robo=./robo`
 
 ### Stack
 
 ```bash
-robo up                  # Start (auto-installs on first run)
-robo down                # Stop containers, keep volumes
-robo ps                  # Container status
-robo build               # Rebuild images (after changing the Dockerfile)
-robo build --no-cache    # Rebuild without layer cache
-robo logs [service]      # Tail logs (omit service = all)
+./robo up                  # Start (installs Magento automatically on first run)
+./robo up --sample-data    # First run only: also install sample data
+./robo down                # Stop containers, keep data
+./robo ps                  # Container status
+./robo logs [service]      # Tail logs (omit service = all)
+./robo build [--no-cache]  # Rebuild the PHP image (after changing PHP_VERSION or the Dockerfile)
+./robo shell [service]     # bash in maintenance (default) or any container
 ```
 
 ### Magento
 
 ```bash
-robo magento cache:flush
-robo magento setup:upgrade
-robo magento indexer:reindex
-robo composer require vendor/package
-robo shell               # bash in maintenance container
-robo shell nginx         # bash in any container
-```
-
-### Module workflow
-
-```bash
-# Symlink modules/ → src/app/code/ (called automatically by robo up)
-robo module:link
-
-# Enable a module
-robo module:enable Vendor_Module
-
-# After editing code — re-compile DI and clean caches
-robo module:init Vendor_Module
-
-# Disable
-robo module:disable Vendor_Module
-```
-
-### Cache
-
-```bash
-robo cache:flush
-robo cache:clean full_page block_html
+./robo magento cache:flush
+./robo magento indexer:reindex
+./robo composer require vendor/package
+./robo cache:clean full_page block_html
 ```
 
 ### Database
 
 ```bash
-robo db:dump                    # → backup.sql.gz
-robo db:import backup.sql.gz    # Import a dump + cache:flush
+./robo db:dump                    # → backup.sql.gz
+./robo db:dump -- my-backup.sql.gz
+./robo db:import backup.sql.gz    # Import + cache:flush
 ```
+
+### Upgrading Magento
+
+```bash
+./robo upgrade 2.4.9
+```
+
+This backs up the database, enables maintenance mode, runs the official `composer require-commerce` root update, then `setup:upgrade`, `setup:di:compile` and a full reindex.
+
+**Upgrading an existing 2.4.7/2.4.8 install to 2.4.9:**
+
+1. `git pull && ./setup --update`. Check your `.env` against `.env.example` and copy over the new `*_VERSION` lines and the renamed `MAILPIT_*` / `VALKEY_*` keys.
+2. `./robo build && ./robo up`. This builds PHP 8.5 and starts the new services. MariaDB upgrades its data files on its own (`MARIADB_AUTO_UPGRADE`).
+3. `./robo upgrade 2.4.9`. The reindex at the end rebuilds the OpenSearch 3 indexes, which now live in a Docker volume.
 
 ### Xdebug
 
-Xdebug is baked into the image when built with `XDEBUG_ENABLED=true`, but can be toggled at runtime without rebuilding:
+```bash
+# Once: set XDEBUG_ENABLED=true in .env, then
+./robo build
+./robo xdebug:on    # Listens on port 9003 (PhpStorm default)
+./robo xdebug:off
+```
+
+PhpStorm: **Settings → PHP → Servers**. Add host `magento.localhost` and map the project's `src/` to `/var/www/html`.
+
+### Full reset
 
 ```bash
-robo xdebug:on    # Enables, listens on port 9003 (PhpStorm default)
-robo xdebug:off   # Disables
+./robo reset                 # Asks first, wipes DB + volumes, reinstalls
+./robo reset --sample-data
+```
+
+---
+
+## Module development
+
+Put each module in `modules/Vendor/ModuleName/`. `./robo up` symlinks them into `src/app/code/` (or run `./robo module:link` yourself).
+
+```bash
+./robo module:enable Vendor_ModuleName
+./robo module:init  Vendor_ModuleName   # setup:upgrade + di:compile + cache:clean
+./robo module:disable Vendor_ModuleName
 ```
 
 ### Code quality
 
 ```bash
-robo lint          # PHPCS (PSR-12) + PHPStan (level 8) on modules/
-robo lint:fix      # PHPCBF auto-fix
+./robo lint       # PHPCS with the official Magento2 coding standard + PHPStan (level 8)
+./robo lint:fix   # Auto-fix with PHPCBF
 ```
 
-### Full reset
+---
 
-```bash
-robo reset                   # Asks for confirmation, wipes DB + volumes, reinstalls
-robo reset --sample-data     # Same, with sample data
-```
+## CI
+
+`.github/workflows/ci.yml` runs on every push:
+
+- **lint**: shellcheck, hadolint, `docker compose config`, Robo loads, Varnish VCL compiles, `nginx -t`
+- **build**: builds the PHP image for PHP 8.4 and 8.5 and checks every extension Magento requires
+- **e2e** (optional): runs `./setup` for a full install and curls the storefront and admin. To turn it on, add `MAGENTO_REPO_PUBLIC_KEY` and `MAGENTO_REPO_PRIVATE_KEY` as repository secrets.
 
 ---
 
@@ -192,106 +161,36 @@ robo reset --sample-data     # Same, with sample data
 
 ```
 magento-features/
+├── setup                     # One-command install (only needs Docker)
+├── robo                      # Robo launcher (host PHP or container)
 ├── RoboFile.php              # All task automation
-├── Makefile                  # First-time init only
-├── composer.json             # Robo + code-quality tools (host-side)
-├── .version                  # Project version (committed)
-├── .env.example              # Environment template
-│
+├── Makefile                  # Optional aliases: make / make install / make update
+├── composer.json / .lock     # Robo + code-quality tools (host-side)
+├── .env.example              # Environment template incl. service versions
+├── docker-compose.yml
 ├── docker/
-│   ├── php/
-│   │   ├── Dockerfile        # PHP 8.3-FPM (shared by php + maintenance)
-│   │   └── php.ini           # OPcache, memory, error reporting
-│   ├── nginx/
-│   │   ├── nginx.conf
-│   │   └── default.conf      # Listens on 8080 (Varnish backend)
-│   ├── mysql/
-│   │   └── my.cnf            # InnoDB tuning, slow-query log
-│   └── varnish/
-│       └── default.vcl       # Magento FPC BAN support, cookie logic
-│
-├── modules/                  # Custom modules (one dir per module)
-│   └── Aichouchm/
-│       └── ProductRelations/ # Example module (see below)
-│
-├── src/                      # Magento root (populated by robo install)
-│   └── app/code/             # Module symlinks created by robo module:link
-│
-├── volumes/
-│   ├── .composer/            # Composer cache (mounted into maintenance)
-│   └── .ssh/                 # Symlinks to host SSH keys (read-only)
-│
-├── elasticsearch/
-│   └── data/                 # OpenSearch data (survives docker down -v)
-│
-├── phpcs.xml                 # PHPCS ruleset
-└── phpstan.neon              # PHPStan config (level 8)
+│   ├── php/                  # PHP-FPM image (php + maintenance), php.ini, pool
+│   ├── robo/                 # Tiny PHP CLI + docker CLI toolbox for ./robo
+│   ├── nginx/                # nginx.conf + Magento vhost (8080 = Varnish backend)
+│   ├── mysql/my.cnf          # MariaDB tuning, slow-query log
+│   └── varnish/default.vcl   # FPC rules, PURGE/BAN support
+├── modules/                  # Your custom modules (Vendor/Module)
+├── src/                      # Magento root (created on install, git-ignored)
+└── volumes/                  # Composer cache, SSH files for the CLI container
 ```
 
 ---
 
-## Adding a new module
+## Troubleshooting
 
-1. Create it in `modules/Vendor/ModuleName/`
-2. Run `robo module:enable Vendor_ModuleName`
-3. Run `robo module:init Vendor_ModuleName`
-
-Symlinks into `src/app/code/` are created automatically by `robo up`. If the stack is already running, run `robo module:link` first.
-
-Each module is an independent, self-contained Git project. The `modules/` directory is the portfolio.
-
----
-
-## Modules
-
-### `Aichouchm_ProductRelations`
-
-Manages directional relationships between products (color variants, size siblings, accessories).
-
-**Architecture highlights:**
-
-- Full service-contract stack: `ProductRelationInterface`, `ProductRelationRepositoryInterface`, `SearchResultsInterface`
-- Repository pattern with in-memory identity map (no duplicate DB reads per request)
-- Declarative schema (`db_schema.xml`) with composite unique constraint, FK cascades, and a covering index
-- Single optimised `fetchCol` query for related ID lookups — no N+1 loads
-- REST API via `webapi.xml` with ACL-protected routes
-- Frontend block with per-product block cache key and configurable lifetime
-- Admin configuration via `system.xml` + `config.xml`
-- PHPUnit tests covering cache invalidation and `NoSuchEntityException`
-
-**REST API:**
-
-```
-GET    /V1/products/:productId/relations    # Get related product IDs
-POST   /V1/product-relations               # Create a relation
-DELETE /V1/product-relations/:entityId     # Delete a relation
-```
-
----
-
-## Xdebug with PhpStorm
-
-1. In PhpStorm: **Preferences → PHP → Servers** — add a server with:
-   - Host: `magento.local`
-   - Path mappings: project `/src` → `/var/www/html`
-2. Run `robo xdebug:on`
-3. Start listening in PhpStorm (phone icon)
-4. Set a breakpoint and reload the page
-
----
-
-## Version integrity
-
-The project uses a `.version` / `.made` system:
-
-- `.version` is committed and incremented when the setup changes
-- `.made` is written by `make` and must match `.version`
-- `robo up` and `robo install` abort with a clear error if they differ
-
-After a `git pull`:
-```bash
-make update
-```
+| Symptom | Fix |
+|---|---|
+| `port is already allocated` | Change the port in `.env` (`VARNISH_PORT`, `NGINX_DIRECT_PORT`, `MYSQL_PORT`…) and run `./robo up` again |
+| OpenSearch keeps restarting | Linux: `sudo sysctl -w vm.max_map_count=262144`. Also give Docker at least 8 GB RAM |
+| `Version mismatch … Run: ./setup --update` | You pulled changes to the tooling. Run `./setup --update` |
+| Install stopped half-way | Fix the cause shown in the output, then `./robo install` (it starts from a clean web root) |
+| Very slow on Windows | Move the project into the WSL2 filesystem (`~/…`), not `/mnt/c/…` |
+| `magento.localhost` doesn't resolve (rare, some CLI tools) | `echo "127.0.0.1 magento.localhost" \| sudo tee -a /etc/hosts` |
 
 ---
 

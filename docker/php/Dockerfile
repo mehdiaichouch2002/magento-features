@@ -1,44 +1,40 @@
-FROM php:8.3-fpm-bookworm
+# syntax=docker/dockerfile:1
+ARG PHP_VERSION=8.5
+FROM php:${PHP_VERSION}-fpm-trixie
 
 ARG XDEBUG_ENABLED=false
 
 # ─── System dependencies ──────────────────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git unzip zip curl \
-    libzip-dev libpng-dev libjpeg-dev libwebp-dev libfreetype6-dev \
-    libxml2-dev libxslt1-dev libssl-dev libicu-dev libsodium-dev \
-    libonig-dev libmagickwand-dev imagemagick \
-    procps vim mariadb-client \
+        git unzip zip curl ca-certificates gnupg \
+        procps vim mariadb-client msmtp \
     && rm -rf /var/lib/apt/lists/*
 
-# ─── PHP extensions ───────────────────────────────────────────────────────────
-RUN docker-php-ext-configure gd \
-        --with-freetype \
-        --with-jpeg \
-        --with-webp \
-    && docker-php-ext-install -j$(nproc) \
+# ─── PHP extensions (Magento 2.4.9 requirements) ──────────────────────────────
+# install-php-extensions picks the right build deps and PECL versions for the
+# current PHP release, so bumping PHP_VERSION needs no changes here.
+ADD --chmod=0755 \
+    https://github.com/mlocati/docker-php-extension-installer/releases/download/2.12.0/install-php-extensions \
+    /usr/local/bin/
+RUN install-php-extensions \
         bcmath \
         calendar \
         exif \
+        ftp \
         gd \
         intl \
-        mbstring \
         opcache \
         pdo_mysql \
+        redis \
         soap \
         sockets \
         sodium \
         xsl \
         zip
 
-# ─── PECL extensions ──────────────────────────────────────────────────────────
-RUN pecl install redis imagick \
-    && docker-php-ext-enable redis imagick
-
 # ─── Xdebug (only when XDEBUG_ENABLED=true) ──────────────────────────────────
 RUN if [ "$XDEBUG_ENABLED" = "true" ]; then \
-        pecl install xdebug \
-        && docker-php-ext-enable xdebug \
+        install-php-extensions xdebug \
         && { \
             echo "xdebug.mode=debug,develop"; \
             echo "xdebug.start_with_request=yes"; \
@@ -49,14 +45,14 @@ RUN if [ "$XDEBUG_ENABLED" = "true" ]; then \
         } >> /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini; \
     fi
 
-# ─── Composer (used by both FPM and maintenance) ──────────────────────────────
-COPY --from=composer:2.7 /usr/bin/composer /usr/local/bin/composer
+# ─── Composer ─────────────────────────────────────────────────────────────────
+COPY --from=composer:2.10 /usr/bin/composer /usr/local/bin/composer
 
-# ─── Node.js LTS (for frontend builds in maintenance container) ───────────────
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y nodejs \
-    && npm install -g npm@latest \
-    && rm -rf /var/lib/apt/lists/*
+# ─── Node.js LTS (frontend builds in the maintenance container) ───────────────
+COPY --from=node:22-trixie-slim /usr/local/bin/node /usr/local/bin/node
+COPY --from=node:22-trixie-slim /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 
 # ─── Permissions: align uid/gid with typical dev host (1000) ─────────────────
 RUN usermod -u 1000 www-data && groupmod -g 1000 www-data

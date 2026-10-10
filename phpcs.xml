@@ -5,28 +5,22 @@
     <arg name="basepath" value="."/>
     <arg name="colors"/>
     <arg name="parallel" value="8"/>
+    <arg name="extensions" value="php,phtml"/>
     <arg value="sp"/>
 
     <!-- Target only custom modules -->
     <file>modules/</file>
 
-    <exclude-pattern>*/Test/*</exclude-pattern>
     <exclude-pattern>*/vendor/*</exclude-pattern>
 
-    <!-- PSR-12 base -->
-    <rule ref="PSR12"/>
-
-    <!-- Magento ECG rules (install: composer require magento/magento-coding-standard) -->
-    <!-- Uncomment when available in the container:
+    <!-- Official Magento coding standard (includes PSR-12 and PHPCompatibility).
+         Registered automatically by dealerdirect/phpcodesniffer-composer-installer. -->
     <rule ref="Magento2"/>
-    -->
 
-    <!-- Disallow direct ObjectManager usage -->
-    <rule ref="Magento2.PHP.FinalImplementation"/>
-    <rule ref="Generic.PHP.NoSilencedErrors"/>
-    <rule ref="Squiz.Functions.FunctionDeclarationArgumentSpacing">
-        <properties>
-            <property name="equalsSpacing" value="1"/>
-        </properties>
+    <!-- Tests may use relaxed rules -->
+    <rule ref="Magento2.Functions.StaticFunction">
+        <exclude-pattern>*/Test/*</exclude-pattern>
     </rule>
+
+    <rule ref="Generic.PHP.NoSilencedErrors"/>
 </ruleset>

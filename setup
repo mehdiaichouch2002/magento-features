@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+# One-command setup for the Magento 2 lab.
+#
+#   ./setup              Prepare the project, then start and install Magento
+#   ./setup --no-start   Prepare only (what `make` does)
+#   ./setup --update     Re-install tooling after a git pull (what `make update` does)
+#   ./setup --sample-data   Same as ./setup, plus Magento sample data
+#
+# Only Docker (with the Compose v2 plugin) is required on the host.
+# Repo keys can be passed non-interactively (CI) through the environment:
+#   MAGENTO_REPO_PUBLIC_KEY=… MAGENTO_REPO_PRIVATE_KEY=… ./setup
+set -euo pipefail
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$DIR"
+
+START=1
+UPDATE=0
+SAMPLE_DATA=0
+for arg in "$@"; do
+    case "$arg" in
+        --no-start)    START=0 ;;
+        --update)      UPDATE=1; START=0 ;;
+        --sample-data) SAMPLE_DATA=1 ;;
+        -h|--help)     sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        *) echo "Unknown option: $arg (see ./setup --help)" >&2; exit 2 ;;
+    esac
+done
+
+say()  { printf '  %s\n' "$*"; }
+step() { printf '\n→ %s\n' "$*"; }
+die()  { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
+
+# ─── 1. Host checks ───────────────────────────────────────────────────────────
+step "Checking requirements"
+
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+        die "Run this from WSL2 (Ubuntu), not Git Bash / Windows.
+       Clone the repo inside the WSL filesystem (e.g. ~/projects), not under /mnt/c —
+       Magento on Windows-mounted folders is extremely slow.
+       Guide: https://docs.docker.com/desktop/features/wsl/" ;;
+esac
+
+command -v docker >/dev/null 2>&1 || die "Docker is not installed: https://docs.docker.com/get-docker/"
+docker info >/dev/null 2>&1      || die "Docker is installed but not running (start Docker Desktop / the docker service)."
+docker compose version >/dev/null 2>&1 || die "Docker Compose v2 plugin missing: https://docs.docker.com/compose/install/"
+say "Docker $(docker version --format '{{.Server.Version}}'), $(docker compose version --short 2>/dev/null || echo 'compose v2')"
+
+if [ "$(uname -s)" = "Linux" ]; then
+    max_map=$(cat /proc/sys/vm/max_map_count 2>/dev/null || echo 0)
+    if [ "$max_map" -lt 262144 ]; then
+        say "Note: OpenSearch prefers vm.max_map_count >= 262144 (current: $max_map)."
+        say "      Fix with: sudo sysctl -w vm.max_map_count=262144"
+    fi
+fi
+
+# ─── 2. Folders and .env ──────────────────────────────────────────────────────
+step "Preparing project files"
+mkdir -p src modules volumes/.composer volumes/.ssh
+[ -f volumes/.ssh/known_hosts ] || { touch volumes/.ssh/known_hosts; chmod 644 volumes/.ssh/known_hosts; }
+if [ ! -f .env ]; then
+    cp .env.example .env
+    say "Created .env from .env.example"
+else
+    say ".env already exists — leaving it untouched"
+fi
+
+set_env() { # set_env KEY VALUE — replace the KEY= line in .env
+    local key="$1" value="$2" tmp
+    tmp="$(mktemp)"
+    awk -v k="$key" -v v="$value" 'BEGIN{FS=OFS="="} $1==k{print k"="v; found=1; next} {print} END{if(!found) print k"="v}' .env > "$tmp"
+    cat "$tmp" > .env && rm -f "$tmp"
+}
+get_env() { grep -E "^$1=" .env | tail -1 | cut -d= -f2- | tr -d "\"'" || true; }
+
+# Keys from the environment (CI) win over empty values in .env.
+[ -n "${MAGENTO_REPO_PUBLIC_KEY:-}" ]  && set_env MAGENTO_REPO_PUBLIC_KEY  "$MAGENTO_REPO_PUBLIC_KEY"
+[ -n "${MAGENTO_REPO_PRIVATE_KEY:-}" ] && set_env MAGENTO_REPO_PRIVATE_KEY "$MAGENTO_REPO_PRIVATE_KEY"
+
+if [ "$UPDATE" -eq 0 ] && [ -z "$(get_env MAGENTO_REPO_PUBLIC_KEY)" ] && [ -t 0 ]; then
+    echo
+    say "Magento downloads need free Adobe Marketplace keys:"
+    say "https://commercemarketplace.adobe.com/customer/accessKeys/"
+    say "(Press Enter to skip — you can add them to .env later.)"
+    read -r -p "  Public key:  " pub
+    if [ -n "$pub" ]; then
+        read -r -s -p "  Private key: " priv; echo
+        set_env MAGENTO_REPO_PUBLIC_KEY "$pub"
+        set_env MAGENTO_REPO_PRIVATE_KEY "$priv"
+        say "Keys saved to .env (git-ignored)."
+    fi
+fi
+
+# ─── 3. Tooling (Robo + code-quality tools) ───────────────────────────────────
+step "Installing project tooling (Robo)"
+if command -v composer >/dev/null 2>&1 && command -v php >/dev/null 2>&1 \
+    && php -r 'exit(PHP_VERSION_ID >= 80200 ? 0 : 1);' 2>/dev/null; then
+    COMPOSER_HOME="$DIR/volumes/.composer" composer install --no-interaction --prefer-dist --no-progress
+else
+    say "Using the composer Docker image (no host PHP/Composer needed)"
+    docker run --rm \
+        -u "$(id -u):$(id -g)" \
+        -e COMPOSER_HOME=/tmp/composer \
+        -v "$DIR:/app" -w /app \
+        composer:2.10 install --no-interaction --prefer-dist --no-progress --ignore-platform-reqs
+fi
+chmod +x robo
+
+cat .version > .made
+say "Tooling ready (version $(cat .version))"
+
+# ─── 4. Start + install ───────────────────────────────────────────────────────
+if [ "$START" -eq 0 ]; then
+    echo
+    say "Done. Next: ./robo up   (installs Magento automatically on first run)"
+    exit 0
+fi
+
+if [ -z "$(get_env MAGENTO_REPO_PUBLIC_KEY)" ] || [ -z "$(get_env MAGENTO_REPO_PRIVATE_KEY)" ]; then
+    echo
+    say "No Magento repo keys yet. Add them to .env, then run: ./robo up"
+    exit 0
+fi
+
+step "Starting the stack and installing Magento $(get_env MAGENTO_VERSION) (first run: ~10-20 min)"
+if [ "$SAMPLE_DATA" -eq 1 ] && [ ! -f src/app/etc/env.php ]; then
+    ./robo up --sample-data
+else
+    ./robo up
+fi

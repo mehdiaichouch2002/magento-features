@@ -1,0 +1,122 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ─── Fast static checks on every push ────────────────────────────────────
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Shell scripts (shellcheck)
+        run: shellcheck setup robo
+
+      - name: Dockerfiles (hadolint)
+        uses: hadolint/hadolint-action@v3.5.0
+        with:
+          recursive: true
+          failure-threshold: error
+
+      - name: Compose file is valid
+        run: cp .env.example .env && docker compose config --quiet
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+
+      - name: Tooling installs and RoboFile loads
+        run: |
+          composer validate --strict
+          composer install --no-interaction --no-progress
+          php -l RoboFile.php
+          php bin/robo --load-from . list
+
+      - name: Varnish VCL compiles
+        run: |
+          VARNISH=$(grep -E '^VARNISH_VERSION=' .env.example | cut -d= -f2)
+          docker run --rm --add-host nginx:127.0.0.1 \
+            -v "$PWD/docker/varnish:/etc/varnish:ro" \
+            "varnish:${VARNISH}-alpine" varnishd -C -f /etc/varnish/default.vcl > /dev/null
+
+      - name: Nginx config is valid
+        run: |
+          NGINX=$(grep -E '^NGINX_VERSION=' .env.example | cut -d= -f2)
+          docker run --rm --add-host php:127.0.0.1 \
+            -v "$PWD/docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" \
+            -v "$PWD/docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro" \
+            "nginx:${NGINX}-alpine" nginx -t
+
+  # ─── PHP image builds for the supported PHP versions ─────────────────────
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        php: ['8.4', '8.5']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: docker/php
+          build-args: PHP_VERSION=${{ matrix.php }}
+          tags: magento-lab/php:${{ matrix.php }}
+          load: true
+          cache-from: type=gha,scope=php-${{ matrix.php }}
+          cache-to: type=gha,mode=max,scope=php-${{ matrix.php }}
+      - name: Required PHP extensions are present
+        run: |
+          docker run --rm magento-lab/php:${{ matrix.php }} php -m > modules.txt
+          for ext in bcmath ctype curl dom fileinfo ftp gd hash iconv intl json \
+                     libxml mbstring openssl pdo_mysql simplexml soap sockets \
+                     sodium tokenizer xmlwriter xsl zip redis "Zend OPcache"; do
+            grep -qix "$ext" modules.txt || { echo "missing: $ext"; exit 1; }
+          done
+
+  # ─── Full install smoke test (needs repo.magento.com keys) ───────────────
+  # Add MAGENTO_REPO_PUBLIC_KEY / MAGENTO_REPO_PRIVATE_KEY as repository
+  # secrets to enable it. Runs on demand and on pushes to main.
+  e2e:
+    if: github.event_name != 'pull_request'
+    needs: [lint, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      MAGENTO_REPO_PUBLIC_KEY: ${{ secrets.MAGENTO_REPO_PUBLIC_KEY }}
+      MAGENTO_REPO_PRIVATE_KEY: ${{ secrets.MAGENTO_REPO_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Skip without repo keys
+        id: keys
+        run: |
+          if [ -z "$MAGENTO_REPO_PUBLIC_KEY" ]; then
+            echo "No repo keys configured — skipping install test."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Raise vm.max_map_count for OpenSearch
+        if: steps.keys.outputs.skip != 'true'
+        run: sudo sysctl -w vm.max_map_count=262144
+      - name: ./setup (one-command install)
+        if: steps.keys.outputs.skip != 'true'
+        run: ./setup < /dev/null
+      - name: Storefront and admin respond
+        if: steps.keys.outputs.skip != 'true'
+        run: |
+          curl -fsS -o /dev/null -w 'storefront via varnish: %{http_code}\n' http://magento.localhost/
+          curl -fsS -o /dev/null -w 'storefront direct:      %{http_code}\n' http://magento.localhost:8080/
+          curl -fsS -o /dev/null -w 'admin:                  %{http_code}\n' http://magento.localhost/admin
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs --tail=200
