@@ -33,7 +33,8 @@ Versions follow the official [Magento 2.4.9 system requirements](https://experie
 | Service | Version | Purpose |
 |---|---|---|
 | `php` | PHP 8.5-FPM (custom image) | Serves HTTP requests only |
-| `maintenance` | same image | CLI: `bin/magento`, Composer 2.10, Node 22, cron |
+| `maintenance` | same image | CLI: `bin/magento`, Composer 2.10, Node 22 |
+| `cron` | same image | Runs `bin/magento cron:run` every minute (indexers, emails, scheduled jobs) |
 | `nginx` | 1.30 | PHP-FPM proxy |
 | `varnish` | 8.0 | HTTP cache layer |
 | `db` | MariaDB 12.3 | Database |
@@ -85,6 +86,7 @@ Tip: `alias robo=./robo`
 ./robo magento indexer:reindex
 ./robo composer require vendor/package
 ./robo cache:clean full_page block_html
+./robo warmup               # Pre-build CSS/JS (runs automatically after install/upgrade/module:init)
 ```
 
 ### Database

@@ -67,6 +67,39 @@ services:
     depends_on:
       - php
 
+  # ─── Cron ────────────────────────────────────────────────────────────────
+  # Runs bin/magento cron:run every minute: keeps indexers valid, sends queued
+  # emails and runs scheduled jobs. Idles until Magento is installed.
+  cron:
+    build:
+      context: ./docker/php
+      args:
+        PHP_VERSION: ${PHP_VERSION:-8.5}
+        XDEBUG_ENABLED: ${XDEBUG_ENABLED:-false}
+    image: magento-lab/php:${PHP_VERSION:-8.5}
+    pull_policy: never
+    container_name: magento_cron
+    restart: unless-stopped
+    command:
+      - bash
+      - -c
+      - |
+        while true; do
+          if [ -f /var/www/html/app/etc/env.php ]; then
+            php /var/www/html/bin/magento cron:run >> /var/www/html/var/log/magento.cron.log 2>&1
+          fi
+          sleep 60
+        done
+    environment:
+      MAGENTO_MODE: ${MAGENTO_MODE:-developer}
+      PHP_MEMORY_LIMIT: ${PHP_MEMORY_LIMIT_CLI:-4G}
+    volumes:
+      - ./src:/var/www/html:delegated
+      - ./modules:/var/www/modules:delegated
+      - ./docker/php/php.ini:/usr/local/etc/php/conf.d/zz-custom.ini:ro
+    depends_on:
+      - php
+
   # ─── Nginx ───────────────────────────────────────────────────────────────
   # Listens on 8080 (Varnish backend). Direct access via host port 8080.
   nginx:

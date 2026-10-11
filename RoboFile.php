@@ -193,7 +193,47 @@ class RoboFile extends Tasks
 
         $this->_runInMaintenance(sprintf('php %s/bin/magento cache:flush', self::WEB_ROOT));
 
+        $this->warmup();
         $this->_printUrls($env);
+    }
+
+    /**
+     * Pre-build CSS/JS so the first page you open is styled
+     *
+     * setup:upgrade and di:compile wipe pub/static. In developer mode Magento
+     * rebuilds those files on the first page view (compiling ~1 MB of LESS),
+     * and a browser loading the page during that compile can end up with no
+     * styles. This requests the storefront and admin once, then each of their
+     * stylesheets and scripts one at a time, so the build happens here instead.
+     */
+    public function warmup(): void
+    {
+        $env     = $this->_readEnv();
+        $baseUrl = rtrim($env['MAGENTO_BASE_URL'] ?? 'http://magento.localhost/', '/') . '/';
+        $admin   = $env['MAGENTO_ADMIN_URI'] ?? 'admin';
+
+        $this->say('→ Warming up storefront and admin assets…');
+        // --connect-to sends every request to nginx while keeping the store's
+        // own host name, so Magento renders exactly what a browser would get.
+        $script = <<<'BASH'
+            base="$1"; shift
+            fetch() { curl -s --max-time 300 --connect-to ::nginx:8080 "$@"; }
+            n=0
+            for page in "$@"; do
+                for asset in $(fetch "$base$page" | grep -oE "${base}static/[^\"' ]+\.(css|js)" | sort -u); do
+                    fetch -o /dev/null "$asset" && n=$((n + 1))
+                done
+            done
+            echo "  $n assets ready"
+            BASH;
+
+        $this->_runInMaintenance(
+            sprintf('bash -c %s _ %s "" %s', escapeshellarg($script), escapeshellarg($baseUrl), escapeshellarg($admin)),
+            null,
+            null,
+            false,
+            false
+        );
     }
 
     /**
@@ -218,6 +258,7 @@ class RoboFile extends Tasks
         $this->_runInMaintenance(sprintf('php %s/bin/magento indexer:reindex', self::WEB_ROOT));
         $this->_runInMaintenance(sprintf('php %s/bin/magento cache:flush', self::WEB_ROOT));
 
+        $this->warmup();
         $this->_printUrls($env);
     }
 
@@ -280,6 +321,7 @@ class RoboFile extends Tasks
             $this->_runInMaintenance(sprintf('php %s/bin/magento %s', self::WEB_ROOT, $cmd));
         }
 
+        $this->warmup();
         $this->say("Upgraded to Magento {$version}. Set MAGENTO_VERSION={$version} in .env to keep it in sync.");
         $this->say("Rollback: restore src/composer.json + composer.lock, then robo db:import {$backup}");
     }
@@ -557,6 +599,7 @@ class RoboFile extends Tasks
         $this->magento(['setup:upgrade', '--no-interaction']);
         $this->magento(['setup:di:compile']);
         $this->magento(['cache:clean']);
+        $this->warmup();
 
         if ($module !== '') {
             $this->say("$module is ready.");
@@ -706,8 +749,12 @@ class RoboFile extends Tasks
         }
 
         if ($composerAuth !== null) {
+            // Pass the variable by name only: compose reads the value from this
+            // process' environment, so the repo keys never appear in the
+            // command line that Robo echoes (or in `ps`).
+            putenv('COMPOSER_AUTH=' . $composerAuth);
             $execArgs[] = '-e';
-            $execArgs[] = 'COMPOSER_AUTH=' . $composerAuth;
+            $execArgs[] = 'COMPOSER_AUTH';
         }
 
         $execArgs[] = self::MAINTENANCE_SERVICE;
